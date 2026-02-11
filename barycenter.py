@@ -2,6 +2,7 @@ from firedrake import *
 from solvers import HeatEquationSolver
 import matplotlib.pyplot as plt
 from firedrake.pyplot import tripcolor
+from math import max
 
 def wasserstein_barycenter(mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v_list=None, w_list=None):
     """
@@ -56,15 +57,16 @@ def wasserstein_barycenter(mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, 
     #for j in range(num_dists):
         mu.assign(1.0)
         # THIS LOOP CAN BE PARALLELISED
-        test_func.assign(w_list[0].function)
+        res = 0
         for i in range(num_dists):
+            test_func.assign(w_list[0].function)
             v_list[i].solve()
             w_list[i].update(curr[i] / v_list[i].output_function)
             w_list[i].solve()
             d_list[i].interpolate(v_list[i].function * w_list[i].output_function)
             mu.interpolate(mu * (d_list[i] ** alphas[i]))
 
-        res = norm(test_func - w_list[0].function)
+            res = max(norm(test_func - w_list[0].function), res)
 
         for i in range(num_dists):
             v_list[i].update(v_list[i].function * (mu / d_list[i]))
