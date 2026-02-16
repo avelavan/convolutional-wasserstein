@@ -2,7 +2,6 @@ from firedrake import *
 from solvers import HeatEquationSolver
 import matplotlib.pyplot as plt
 from firedrake.pyplot import tripcolor
-from math import max
 
 def wasserstein_barycenter(mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v_list=None, w_list=None):
     """
@@ -110,14 +109,15 @@ mu_2.assign(mu_2/Imu_2)
 mus = [mu_0, mu_1]
 alphas = [0.5, 0.5]
 
-_, v_list, w_list = wasserstein_barycenter(mus, alphas, V, epsilon=1)
-bary1, v_list, w_list = wasserstein_barycenter(mus, alphas, V, epsilon=0.1, v_list=v_list, w_list=w_list)
+_, v_list, w_list = wasserstein_barycenter(mus, alphas, V, epsilon=1, tol=1e-3)
+_, v_list, w_list = wasserstein_barycenter(mus, alphas, V, epsilon=0.95, tol=1e-3, v_list=v_list, w_list=w_list)
+bary1, v_list, w_list = wasserstein_barycenter(mus, alphas, V, epsilon=0.90, v_list=v_list, w_list=w_list)
 #bary1, _, _ = wasserstein_barycenter(mus, alphas, V, epsilon=0.005, v_funcs=v_funcs, w_funcs=w_funcs)
 
 print('done')
 
-bary2, _, _ = wasserstein_barycenter(mus, alphas, V, epsilon=0.1)
-VTKFile("bary1.pvd").write(mu_0, mu_1, mu_2, bary1)
+bary2, _, _ = wasserstein_barycenter(mus, alphas, V, epsilon=0.81)
+# VTKFile("bary1.pvd").write(mu_0, mu_1, mu_2, bary1)
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
