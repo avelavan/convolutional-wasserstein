@@ -91,8 +91,9 @@ sigma_0 = 0.1
 sigma_1 = 0.1
 sigma_2 = 0.1
 
-mu_0, mu_1, mu_2 = Function(V), Function(V), Function(V)
-
+mu_0 = Function(V)
+mu_1 = Function(V)
+mu_2 = Function(V)
 
 x, y = SpatialCoordinate(V.mesh())
 mu_0.interpolate((1 / (2 * pi * sigma_0**2)) * exp(-((x- mean_0[0])**2 + (y - mean_0[1])**2) / (2 * sigma_0**2)))
