@@ -2,15 +2,7 @@ from firedrake import *
 
 
 class HeatEquationSolver:
-    def __init__(
-        self,
-        V,
-        dt=0.1,
-        params={
-            'ksp_type': 'preonly',
-            'pc_type': 'lu'
-        }
-    ):
+    def __init__(self, V, dt=0.1, params=None):
         """
         A heat equation solver that uses a single step of backward euler.
         This results in a modified Helmholtz equation which can be solved by Firedrake.
@@ -21,7 +13,10 @@ class HeatEquationSolver:
         dt     : The time step (only one timestep is completed)
         params : The firedrake solver parameters
         """
-        self.dt = dt
+        if params is None:
+            params = {"ksp_type": "preonly", "pc_type": "lu"}
+
+        self.dt_const = Constant(dt)
 
         self.u = TrialFunction(V)
         self.v = TestFunction(V)
@@ -29,18 +24,13 @@ class HeatEquationSolver:
         self.output_function = Function(V)
 
         self.a = (
-            self.dt * inner(grad(self.u), grad(self.v)) +
-            inner(self.u, self.v)
+            self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
         ) * dx
         self.L = inner(self.function, self.v) * dx
 
-        self.problem = LinearVariationalProblem(
-            self.a, self.L, self.output_function
-        )
+        self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
         self.params = params
-        self.solver = LinearVariationalSolver(
-            self.problem, solver_parameters=params
-        )
+        self.solver = LinearVariationalSolver(self.problem, solver_parameters=params)
 
     def solve(self):
         """
@@ -57,7 +47,7 @@ class HeatEquationSolver:
         """
         Initialise the function to all ones to prevent blow-up
         """
-        if not value:
+        if value is None:
             self.function.assign(1.0)
         else:
             self.function.assign(value)
@@ -80,23 +70,9 @@ class HeatEquationSolver:
         ----------
         new_dt : The new timestep
         """
-        self.dt = new_dt
-
-        # Re-setup problem and solver with new dt
-        self.a = (
-            self.dt * inner(grad(self.u), grad(self.v)) +
-            inner(self.u, self.v)
-        ) * dx
-        self.L = inner(self.function, self.v) * dx
-        self.problem = LinearVariationalProblem(
-            self.a, self.L, self.output_function
-        )
-        self.solver = LinearVariationalSolver(
-            self.problem, solver_parameters=self.params
-        )
+        self.dt_const.assign(new_dt)
 
     def refine(self, new_V, new_dt):
-
         """
         Transfer the current potential into a new refined space
 
@@ -105,7 +81,7 @@ class HeatEquationSolver:
         new_V  : The new function space
         new_dt : The new timestep
         """
-        self.dt = new_dt
+        self.dt_const.assign(new_dt)
 
         # Create new functions in the space
         self.u = TrialFunction(new_V)
@@ -117,13 +93,10 @@ class HeatEquationSolver:
 
         # Setup problem and solver
         self.a = (
-            self.dt * inner(grad(self.u), grad(self.v)) +
-            inner(self.u, self.v)
+            self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
         ) * dx
         self.L = inner(self.function, self.v) * dx
-        self.problem = LinearVariationalProblem(
-            self.a, self.L, self.output_function
-        )
+        self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
         self.solver = LinearVariationalSolver(
             self.problem, solver_parameters=self.params
         )
