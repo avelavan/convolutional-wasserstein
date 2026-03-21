@@ -20,3 +20,6 @@ petsc/
 
 # test files
 experimental/
+
+# dev notes
+dev_notes/
