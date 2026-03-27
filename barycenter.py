@@ -1,5 +1,4 @@
 import time
-
 import matplotlib.pyplot as plt
 from firedrake import *
 from firedrake.pyplot import tripcolor
@@ -8,12 +7,12 @@ from solvers import HeatEquationSolver
 
 
 def wasserstein_barycenter(
-    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v_list=None, w_list=None
+    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None
 ):
     """
     Compute the Wasserstein barycenter of given distributions at a single mesh level.
 
-    Supports epsilon warm-starting: if v_list/w_list are provided from a previous
+    Supports epsilon warm-starting: if v/w are provided from a previous
     run at a different epsilon, the scaling vectors are rescaled accordingly.
     """
     num_dists = len(mus)
@@ -25,25 +24,25 @@ def wasserstein_barycenter(
 
     mu = Function(V, name="mu").assign(1.0)
     mu.interpolate(mu / assemble(mu * dx))
-    test_func = Function(V).assign(1.0)
-    d_list = []
+    w_prev = Function(V).assign(1.0)
+    d = []
 
-    if v_list is None and w_list is None:
-        v_list = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
-        w_list = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
+    if v is None and w is None:
+        v = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
+        w = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
         for i in range(num_dists):
-            v_list[i].initialise()
-            w_list[i].initialise()
+            v[i].initialise()
+            w[i].initialise()
     else:
         for i in range(num_dists):
-            old_epsilon = 2 * float(v_list[i].dt_const)
+            old_epsilon = 2 * float(v[i].dt_const)
             ratio = old_epsilon / epsilon
-            v_list[i].function.interpolate(v_list[i].function ** ratio)
-            v_list[i].update_dt(epsilon / 2)
-            w_list[i].update_dt(epsilon / 2)
+            v[i].rhs.interpolate(v[i].rhs ** ratio)
+            v[i].update_dt(epsilon / 2)
+            w[i].update_dt(epsilon / 2)
 
     for _ in range(num_dists):
-        d_list.append(Function(V).assign(1.0))
+        d.append(Function(V).assign(1.0))
 
     curr = [assemble(interpolate(mus[i], V)) for i in range(num_dists)]
 
@@ -52,22 +51,22 @@ def wasserstein_barycenter(
     while (res > tol) and (j < maxiter):
         mu.assign(1.0)
         # NOTE: this loop has sequential dependencies on mu — parallelising requires
-        # a Jacobi-style update (compute all d_list[i] from previous mu, then update mu)
+        # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
         res = 0
         for i in range(num_dists):
-            test_func.assign(w_list[i].function)
-            v_list[i].solve() # application of the heat kernel?
-            w_list[i].update(curr[i] / v_list[i].output_function)
-            w_list[i].solve()
-            d_list[i].interpolate(v_list[i].function * w_list[i].output_function)
-            mu.interpolate(mu * (d_list[i] ** alphas[i]))
-            res = max(norm(test_func - w_list[i].function), res)
+            w_prev.assign(w[i].rhs)
+            v[i].solve() # application of the heat kernel?
+            w[i].update(curr[i] / v[i].output_function)
+            w[i].solve()
+            d[i].interpolate(v[i].rhs * w[i].output_function)
+            mu.interpolate(mu * (d[i] ** alphas[i]))
+            res = max(norm(w_prev - w[i].rhs), res)
         for i in range(num_dists):
-            v_list[i].update(v_list[i].function * (mu / d_list[i]))
+            v[i].update(v[i].rhs * (mu / d[i]))
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
         j += 1
 
-    return mu, v_list, w_list
+    return mu, v, w
 
 
 def multiscale_wasserstein_barycenter(
@@ -93,8 +92,8 @@ def multiscale_wasserstein_barycenter(
     """
     assert len(Vs) == len(epsilons), "Vs and epsilons must have the same length"
     num_dists = len(mus)
-    v_list = None
-    w_list = None
+    v = None
+    w = None
     total_iters = []
 
     for level, (V, epsilon) in enumerate(zip(Vs, epsilons)):
@@ -103,21 +102,21 @@ def multiscale_wasserstein_barycenter(
             f"\n--- Level {level + 1}/{len(Vs)}: {V.mesh().num_cells()} cells, eps={epsilon:.4f} ---"
         )
 
-        if v_list is None:
+        if v is None:
             # Cold start at coarsest level
-            v_list = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
-            w_list = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
+            v = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
+            w = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
             for i in range(num_dists):
-                v_list[i].initialise()
-                w_list[i].initialise()
+                v[i].initialise()
+                w[i].initialise()
         else:
             # Rescale to new epsilon, then interpolate onto the finer mesh
             for i in range(num_dists):
-                old_epsilon = 2 * float(v_list[i].dt_const)
+                old_epsilon = 2 * float(v[i].dt_const)
                 ratio = old_epsilon / epsilon
-                v_list[i].function.interpolate(v_list[i].function ** ratio)
-                v_list[i].refine(V, epsilon / 2)
-                w_list[i].refine(V, epsilon / 2)
+                v[i].rhs.interpolate(v[i].rhs ** ratio)
+                v[i].refine(V, epsilon / 2)
+                w[i].refine(V, epsilon / 2)
 
         # Project input distributions to current mesh level
         curr = [assemble(interpolate(mus[i], V)) for i in range(num_dists)]
@@ -125,30 +124,30 @@ def multiscale_wasserstein_barycenter(
         # Sinkhorn loop at this level
         mu = Function(V, name="mu").assign(1.0)
         mu.interpolate(mu / assemble(mu * dx))
-        test_func = Function(V).assign(1.0)
-        d_list = [Function(V).assign(1.0) for _ in range(num_dists)]
+        w_prev = Function(V).assign(1.0)
+        d = [Function(V).assign(1.0) for _ in range(num_dists)]
 
         j, res = 0, 1.0
         while res > level_tol and j < maxiter:
             mu.assign(1.0)
             res = 0.0
             for i in range(num_dists):
-                test_func.assign(w_list[i].function)
-                v_list[i].solve()
-                w_list[i].update(curr[i] / v_list[i].output_function)
-                w_list[i].solve()
-                d_list[i].interpolate(v_list[i].function * w_list[i].output_function)
-                mu.interpolate(mu * (d_list[i] ** alphas[i]))
-                res = max(norm(test_func - w_list[i].function), res)
+                w_prev.assign(w[i].rhs)
+                v[i].solve()
+                w[i].update(curr[i] / v[i].output_function)
+                w[i].solve()
+                d[i].interpolate(v[i].rhs * w[i].output_function)
+                mu.interpolate(mu * (d[i] ** alphas[i]))
+                res = max(norm(w_prev - w[i].rhs), res)
             for i in range(num_dists):
-                v_list[i].update(v_list[i].function * (mu / d_list[i]))
+                v[i].update(v[i].rhs * (mu / d[i]))
             print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
             j += 1
 
         total_iters.append(j)
 
     print(f"\nTotal iterations per level: {total_iters}  (sum={sum(total_iters)})")
-    return mu, v_list, w_list
+    return mu, v, w
 
 
 # ── Setup ──────────────────────────────────────────────────────────────────
@@ -199,12 +198,12 @@ COARSE_TOL = 1e-6
 
 print("\n[B] Epsilon schedule with warm-starting")
 t0 = time.perf_counter()
-v_list, w_list = None, None
+v, w = None, None
 for eps in EPSILON_SCHEDULE:
     level_tol = TOL if eps == EPSILON_SCHEDULE[-1] else COARSE_TOL
     print(f"\n  --- eps={eps:.2f} (tol={level_tol:.0e}) ---")
-    _, v_list, w_list = wasserstein_barycenter(
-        mus, alphas, V, epsilon=eps, tol=level_tol, v_list=v_list, w_list=w_list
+    _, v, w = wasserstein_barycenter(
+        mus, alphas, V, epsilon=eps, tol=level_tol, v=v, w=w
     )
 bary_sched = _
 t_sched = time.perf_counter() - t0

@@ -20,13 +20,13 @@ class HeatEquationSolver:
 
         self.u = TrialFunction(V)
         self.v = TestFunction(V)
-        self.function = Function(V)
+        self.rhs = Function(V)
         self.output_function = Function(V)
 
         self.a = (
             self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
         ) * dx
-        self.L = inner(self.function, self.v) * dx
+        self.L = inner(self.rhs, self.v) * dx
 
         self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
         self.params = params
@@ -48,9 +48,9 @@ class HeatEquationSolver:
         Initialise the function to all ones to prevent blow-up
         """
         if value is None:
-            self.function.assign(1.0)
+            self.rhs.assign(1.0)
         else:
-            self.function.assign(value)
+            self.rhs.assign(value)
 
     def update(self, value):
         """
@@ -60,7 +60,7 @@ class HeatEquationSolver:
         ----------
         value : The value to assign to the value function.
         """
-        self.function.interpolate(value)
+        self.rhs.interpolate(value)
 
     def update_dt(self, new_dt):
         """
@@ -89,13 +89,13 @@ class HeatEquationSolver:
         self.output_function = Function(new_V)
 
         # Assign the current function to the new space
-        self.function = assemble(interpolate(self.function, new_V))
+        self.rhs = assemble(interpolate(self.rhs, new_V))
 
         # Setup problem and solver
         self.a = (
             self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
         ) * dx
-        self.L = inner(self.function, self.v) * dx
+        self.L = inner(self.rhs, self.v) * dx
         self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
         self.solver = LinearVariationalSolver(
             self.problem, solver_parameters=self.params
