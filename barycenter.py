@@ -18,19 +18,36 @@ def _entropy(mu):
 
 
 def _entropic_sharpening(
-   mus, h0, a
+   mus, a, H0=None
 ):
     """
     Adds entropic sharpening in distributions for computation of Wasserstein Barycenter.
 
     Args:
         mus: list of probability distributions
-        h0: max H(mu_i) or user defined parameter
         a: list of weights associated to corresponding mus, sum(a) = 1
+        H0: max H(mu_i) or user defined parameter
     Returns:
         sharp_mus: list of probability distribtuions
     """
-    pass
+    if H0 is None:
+        H0 = max(map(_entropy, mus)) # as defined in paper
+
+    H_mu = 0
+    for i in range(0, len(mus)):
+        H_mu -= a[i] * _entropy(mus[i])
+
+    mu_int = assemble(sum(a[i] * mus[i] for i in range(len(mus))) * dx)
+    if H_mu + mu_int < H0 + 1:
+        # root-finding here
+        beta = 1
+        for mu in mus:
+            mu.interpolate(mu ** beta)
+        sharp_mus = mus
+    else:
+        sharp_mus = mus # beta = 1 as per paper
+    
+    return sharp_mus
 
 def wasserstein_barycenter(
     mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=20, v=None, w=None
