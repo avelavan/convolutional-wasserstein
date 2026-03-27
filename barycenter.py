@@ -56,7 +56,7 @@ def wasserstein_barycenter(
         res = 0
         for i in range(num_dists):
             test_func.assign(w_list[i].function)
-            v_list[i].solve()
+            v_list[i].solve() # application of the heat kernel?
             w_list[i].update(curr[i] / v_list[i].output_function)
             w_list[i].solve()
             d_list[i].interpolate(v_list[i].function * w_list[i].output_function)
@@ -86,7 +86,7 @@ def multiscale_wasserstein_barycenter(
     alphas     : Barycenter weights, summing to 1
     Vs         : List of function spaces, coarse to fine
     epsilons   : Regularisation schedule, one value per level (same length as Vs)
-    tol        : Convergence tolerance for the final (finest) level
+
     coarse_tol : Convergence tolerance for all coarser levels — looser is fine
                  since these levels only need to provide a good warm start
     maxiter    : Max Sinkhorn iterations per level
@@ -153,15 +153,15 @@ def multiscale_wasserstein_barycenter(
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 
-EPSILON_TARGET = 0.1
-TOL = 1e-5
+EPSILON_TARGET = 0.00005
+TOL = 1e-2
 N = 200  # single fine mesh
 
 V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
 
 # Define input Gaussians
 means = [[0.4, 0.4], [0.6, 0.6]]
-sigma = 0.1
+sigma = 0.05
 x, y = SpatialCoordinate(V.mesh())
 
 mus = []
@@ -194,8 +194,8 @@ bary_cold, _, _ = wasserstein_barycenter(
 )
 t_cold = time.perf_counter() - t0
 print(f"Wall time: {t_cold:.2f}s")
-
-COARSE_TOL = 1e-2
+"""
+COARSE_TOL = 1e-6
 
 print("\n[B] Epsilon schedule with warm-starting")
 t0 = time.perf_counter()
@@ -216,16 +216,19 @@ print(f"  [B] Eps schedule:     {t_sched:.2f}s   ({t_cold / t_sched:.2f}x)")
 print("=" * 60)
 
 # ── Plot ───────────────────────────────────────────────────────────────────
+"""
+fig, axes = plt.subplots(1, 1, figsize=(10, 4))
 
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+colors1 = tripcolor(bary_cold, axes=axes)
+fig.colorbar(colors1, ax=axes)
+axes.set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
 
-colors1 = tripcolor(bary_cold, axes=axes[0])
-fig.colorbar(colors1, ax=axes[0])
-axes[0].set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
-
+plt.show()
+"""
 colors2 = tripcolor(bary_sched, axes=axes[1])
 fig.colorbar(colors2, ax=axes[1])
 axes[1].set_title(f"[B] Eps schedule (final eps={EPSILON_TARGET})")
 
 plt.tight_layout()
 plt.show()
+"""
