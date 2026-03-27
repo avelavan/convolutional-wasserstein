@@ -2,12 +2,38 @@ import time
 import matplotlib.pyplot as plt
 from firedrake import *
 from firedrake.pyplot import tripcolor
-
 from solvers import HeatEquationSolver
 
+def _entropy(mu):
+    """
+    Computes entropy of a probability distributions.
+
+    Args:
+        mu: probability distribution
+    Returns:
+        entropy: scalar entropy value
+    """
+    entropy = -1 * assemble(mu * ln (mu + 1e-12) * dx)
+    return entropy
+
+
+def _entropic_sharpening(
+   mus, h0, a
+):
+    """
+    Adds entropic sharpening in distributions for computation of Wasserstein Barycenter.
+
+    Args:
+        mus: list of probability distributions
+        h0: max H(mu_i) or user defined parameter
+        a: list of weights associated to corresponding mus, sum(a) = 1
+    Returns:
+        sharp_mus: list of probability distribtuions
+    """
+    pass
 
 def wasserstein_barycenter(
-    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None
+    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=20, v=None, w=None
 ):
     """
     Compute the Wasserstein barycenter of given distributions at a single mesh level.
@@ -152,48 +178,49 @@ def multiscale_wasserstein_barycenter(
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 
-EPSILON_TARGET = 0.00005
-TOL = 1e-2
-N = 200  # single fine mesh
+if __name__ == "__main__":
+    EPSILON_TARGET = 0.01
+    TOL = 1e-5
+    N = 200  # single fine mesh
 
-V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
+    V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
 
-# Define input Gaussians
-means = [[0.4, 0.4], [0.6, 0.6]]
-sigma = 0.05
-x, y = SpatialCoordinate(V.mesh())
+    # Define input Gaussians
+    means = [[0.4, 0.4], [0.6, 0.6]]
+    sigma = 0.05
+    x, y = SpatialCoordinate(V.mesh())
 
-mus = []
-for mean in means:
-    f = Function(V)
-    f.interpolate(
-        (1 / (2 * pi * sigma**2))
-        * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
+    mus = []
+    for mean in means:
+        f = Function(V)
+        f.interpolate(
+            (1 / (2 * pi * sigma**2))
+            * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
+        )
+        f.assign(f / assemble(f * dx))
+        mus.append(f)
+
+    alphas = [0.5, 0.5]
+
+    # Epsilon schedule: ratio ~1.3 between levels so rescaling stays accurate.
+    # Starting ~8x above target means early levels converge in 1-2 iterations.
+    EPSILON_SCHEDULE = [0.8, 0.6, 0.45, 0.34, 0.26, 0.2, 0.15, EPSILON_TARGET]
+
+    # ── Experiment ─────────────────────────────────────────────────────────────
+
+    print("=" * 60)
+    print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
+    print(f"Epsilon schedule: {EPSILON_SCHEDULE}")
+    print("=" * 60)
+
+    print(f"\n[A] Cold start — eps={EPSILON_TARGET} directly")
+    t0 = time.perf_counter()
+    bary_cold, _, _ = wasserstein_barycenter(
+        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL
     )
-    f.assign(f / assemble(f * dx))
-    mus.append(f)
-
-alphas = [0.5, 0.5]
-
-# Epsilon schedule: ratio ~1.3 between levels so rescaling stays accurate.
-# Starting ~8x above target means early levels converge in 1-2 iterations.
-EPSILON_SCHEDULE = [0.8, 0.6, 0.45, 0.34, 0.26, 0.2, 0.15, EPSILON_TARGET]
-
-# ── Experiment ─────────────────────────────────────────────────────────────
-
-print("=" * 60)
-print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
-print(f"Epsilon schedule: {EPSILON_SCHEDULE}")
-print("=" * 60)
-
-print(f"\n[A] Cold start — eps={EPSILON_TARGET} directly")
-t0 = time.perf_counter()
-bary_cold, _, _ = wasserstein_barycenter(
-    mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL
-)
-t_cold = time.perf_counter() - t0
-print(f"Wall time: {t_cold:.2f}s")
-"""
+    t_cold = time.perf_counter() - t0
+    print(f"Wall time: {t_cold:.2f}s")
+    """
 COARSE_TOL = 1e-6
 
 print("\n[B] Epsilon schedule with warm-starting")
@@ -216,18 +243,18 @@ print("=" * 60)
 
 # ── Plot ───────────────────────────────────────────────────────────────────
 """
-fig, axes = plt.subplots(1, 1, figsize=(10, 4))
+    fig, axes = plt.subplots(1, 1, figsize=(10, 4))
 
-colors1 = tripcolor(bary_cold, axes=axes)
-fig.colorbar(colors1, ax=axes)
-axes.set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
+    colors1 = tripcolor(bary_cold, axes=axes)
+    fig.colorbar(colors1, ax=axes)
+    axes.set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
 
-plt.show()
-"""
-colors2 = tripcolor(bary_sched, axes=axes[1])
-fig.colorbar(colors2, ax=axes[1])
-axes[1].set_title(f"[B] Eps schedule (final eps={EPSILON_TARGET})")
+    plt.show()
+    """
+    colors2 = tripcolor(bary_sched, axes=axes[1])
+    fig.colorbar(colors2, ax=axes[1])
+    axes[1].set_title(f"[B] Eps schedule (final eps={EPSILON_TARGET})")
 
-plt.tight_layout()
-plt.show()
-"""
+    plt.tight_layout()
+    plt.show()
+    """
