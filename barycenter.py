@@ -1,8 +1,10 @@
+import time
 import matplotlib.pyplot as plt
 from firedrake import *
 from firedrake.pyplot import tripcolor
 from solvers import HeatEquationSolver
 from scipy.optimize import root_scalar
+
 
 def _entropy(mu):
     """
@@ -13,8 +15,9 @@ def _entropy(mu):
     Returns:
         entropy: scalar entropy value
     """
-    entropy = -1 * assemble(mu * ln (mu + 1e-12) * dx)
+    entropy = -1 * assemble(mu * ln(mu + 1e-12) * dx)
     return entropy
+
 
 def _find_beta(mu, h0, tol=1e-5, maxiter=50):
     """
@@ -23,7 +26,7 @@ def _find_beta(mu, h0, tol=1e-5, maxiter=50):
     Args:
         mu: unsharpened barycenter
         h0: user defined parameter, from _entropic_sharpening
-        tol: tolerance parameter for scipy solver 
+        tol: tolerance parameter for scipy solver
         maxiter: maximum iterations before defaulting to beta=1
 
     Returns:
@@ -37,7 +40,7 @@ def _entropic_sharpening(mu, h0):
     Adds entropic sharpening for computation of Wasserstein Barycenter.
 
     Args:
-        mu: unsharpened Wasserstein barycenter 
+        mu: unsharpened Wasserstein barycenter
         a: list of weights associated to corresponding mus, sum(a) = 1
         h0: user defined parameter, usually max H(mu_i)
     Returns:
@@ -51,12 +54,13 @@ def _entropic_sharpening(mu, h0):
         # root-finding here
         print("sharpening!")
         beta = 1.0
-        mu.interpolate(mu ** beta)
+        mu.interpolate(mu**beta)
         sharp_mu = mu
     else:
-        sharp_mu = mu # beta = 1 as per paper
-    
+        sharp_mu = mu  # beta = 1 as per paper
+
     return sharp_mu
+
 
 def wasserstein_barycenter(
     mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=20, v=None, w=None
@@ -107,14 +111,14 @@ def wasserstein_barycenter(
         res = 0
         for i in range(num_dists):
             w_prev.assign(w[i].rhs)
-            v[i].solve() # application of the heat kernel?
+            v[i].solve()  # application of the heat kernel?
             w[i].update(curr[i] / v[i].output_function)
             w[i].solve()
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
             res = max(norm(w_prev - w[i].rhs), res)
-        
-        h0 = max(map(_entropy, mus)) # as defined in paper
+
+        h0 = max(map(_entropy, mus))  # as defined in paper
         mu = _entropic_sharpening(mu, h0)
 
         for i in range(num_dists):
