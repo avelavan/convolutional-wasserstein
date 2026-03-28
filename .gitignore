@@ -18,8 +18,5 @@ petsc/
 # Latex
 *.pdf
 
-# test files
-experimental/
-
 # dev notes
 dev_notes/
