@@ -1,6 +1,18 @@
 import time
 import matplotlib.pyplot as plt
-from firedrake import *
+from firedrake import (
+    assemble,
+    ln,
+    dx,
+    Function,
+    interpolate,
+    norm,
+    FunctionSpace,
+    UnitSquareMesh,
+    SpatialCoordinate,
+    pi,
+    exp,
+)
 from firedrake.pyplot import tripcolor
 from solvers import HeatEquationSolver
 from scipy.optimize import root_scalar
@@ -72,11 +84,8 @@ def wasserstein_barycenter(
     run at a different epsilon, the scaling vectors are rescaled accordingly.
     """
     num_dists = len(mus)
-    try:
-        assert abs(sum(alphas)) == 1, "Weights must sum to 1."
-    except AssertionError as e:
-        print("Error in weights: ", e)
-        raise e
+    if abs(sum(alphas) - 1) > 1e-10:
+        raise ValueError(f"Weights must sum to 1, got {sum(alphas)}")
 
     mu = Function(V, name="mu").assign(1.0)
     mu.interpolate(mu / assemble(mu * dx))
@@ -176,11 +185,3 @@ if __name__ == "__main__":
     axes.set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
 
     plt.show()
-    """
-    colors2 = tripcolor(bary_sched, axes=axes[1])
-    fig.colorbar(colors2, ax=axes[1])
-    axes[1].set_title(f"[B] Eps schedule (final eps={EPSILON_TARGET})")
-
-    plt.tight_layout()
-    plt.show()
-    """
