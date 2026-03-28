@@ -1,8 +1,8 @@
-import time
 import matplotlib.pyplot as plt
 from firedrake import *
 from firedrake.pyplot import tripcolor
 from solvers import HeatEquationSolver
+from scipy.optimize import root_scalar
 
 def _entropy(mu):
     """
@@ -16,10 +16,23 @@ def _entropy(mu):
     entropy = -1 * assemble(mu * ln (mu + 1e-12) * dx)
     return entropy
 
+def _find_beta(mu, h0, tol=1e-5, maxiter=50):
+    """
+    Performs root-finding to find beta value
 
-def _entropic_sharpening(
-   mu, h0
-):
+    Args:
+        mu: unsharpened barycenter
+        h0: user defined parameter, from _entropic_sharpening
+        tol: tolerance parameter for scipy solver 
+        maxiter: maximum iterations before defaulting to beta=1
+
+    Returns:
+        beta: scalar solution to equation
+    """
+    pass
+
+
+def _entropic_sharpening(mu, h0):
     """
     Adds entropic sharpening for computation of Wasserstein Barycenter.
 
