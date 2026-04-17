@@ -20,3 +20,7 @@ petsc/
 
 # dev notes
 dev_notes/
+
+# misc
+.idea/
+.DS_Store
