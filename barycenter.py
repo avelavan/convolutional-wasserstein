@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import matplotlib.pyplot as plt
 from firedrake import (
     assemble,
@@ -16,6 +17,27 @@ from firedrake import (
 from firedrake.pyplot import tripcolor
 from solvers import BackwardEuler
 from scipy.optimize import root_scalar
+
+
+def gaussian_stats(mu, label=""):
+    """
+    Compute and print the mean and covariance of a distribution,
+    assuming it is Gaussian, using numerical integration.
+    """
+    mesh = mu.function_space().mesh()
+    x, y = SpatialCoordinate(mesh)
+    mean_x = assemble(x * mu * dx)
+    mean_y = assemble(y * mu * dx)
+    cov_xx = assemble((x - mean_x) ** 2 * mu * dx)
+    cov_xy = assemble((x - mean_x) * (y - mean_y) * mu * dx)
+    cov_yy = assemble((y - mean_y) ** 2 * mu * dx)
+    cov = np.array([[cov_xx, cov_xy], [cov_xy, cov_yy]])
+    header = f"Gaussian stats [{label}]" if label else "Gaussian stats"
+    print(f"\n{header}")
+    print(f"  Mean:       ({mean_x:.6f}, {mean_y:.6f})")
+    print(f"  Covariance: [[{cov_xx:.6f}, {cov_xy:.6f}],")
+    print(f"               [{cov_xy:.6f}, {cov_yy:.6f}]]")
+    return np.array([mean_x, mean_y]), cov
 
 
 def _entropy(mu):
@@ -61,9 +83,6 @@ def _find_beta(mu, h0, tol=1e-5, maxiter=200):
         return result.root if result.converged else 1.0
     except ValueError:
         return 1.0
-
-def _entropic_limit_update(mu, h0):
-    pass
 
 
 def _entropic_sharpening(mu, h0):
@@ -200,6 +219,7 @@ if __name__ == "__main__":
     )
     t_single = time.perf_counter() - t0
     print(f"Wall time: {t_single:.2f}s")
+    gaussian_stats(bary_single, label="A: single-step Euler")
 
     print(f"\n[B] Multi-step Euler ({N_STEPS} sub-steps) — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
@@ -208,6 +228,7 @@ if __name__ == "__main__":
     )
     t_multi = time.perf_counter() - t0
     print(f"Wall time: {t_multi:.2f}s")
+    gaussian_stats(bary_multi, label="B: multi-step Euler")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
