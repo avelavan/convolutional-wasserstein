@@ -31,7 +31,7 @@ def _entropy(mu):
     return entropy
 
 
-def _find_beta(mu, h0, tol=1e-5, maxiter=50):
+def _find_beta(mu, h0, tol=1e-5, maxiter=200):
     """
     Performs root-finding to find beta value
 
@@ -44,6 +44,25 @@ def _find_beta(mu, h0, tol=1e-5, maxiter=50):
     Returns:
         beta: scalar solution to equation
     """
+    V = mu.function_space()
+    tmp = Function(V)
+
+    def objective(beta):
+        tmp.interpolate(mu ** beta)
+        tmp.interpolate(tmp / assemble(tmp * dx))
+        return _entropy(tmp) - h0
+
+    a, b = 1.0, 2.0
+    try:
+        if objective(b) > 0:
+            b = 5.0
+        result = root_scalar(objective, bracket=[a, b], method='brentq',
+                             xtol=tol, maxiter=maxiter)
+        return result.root if result.converged else 1.0
+    except ValueError:
+        return 1.0
+
+def _entropic_limit_update(mu, h0):
     pass
 
 
@@ -60,22 +79,17 @@ def _entropic_sharpening(mu, h0):
     """
 
     h_mu = _entropy(mu)
-    mu_int = assemble(mu * dx)
+    if h_mu <= h0:
+        return mu
 
-    if h_mu + mu_int > h0 + 1:
-        # root-finding here
-        print("sharpening!")
-        beta = 1.0
-        mu.interpolate(mu**beta)
-        sharp_mu = mu
-    else:
-        sharp_mu = mu  # beta = 1 as per paper
-
-    return sharp_mu
+    print("sharpening!")
+    beta = _find_beta(mu, h0)
+    mu.interpolate(mu ** beta)
+    return mu
 
 
 def wasserstein_barycenter(
-    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=20, v=None, w=None
+    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None, sharpen=True
 ):
     """
     Compute the Wasserstein barycenter of given distributions at a single mesh level.
@@ -128,7 +142,9 @@ def wasserstein_barycenter(
             res = max(norm(w_prev - w[i].rhs), res)
 
         h0 = max(map(_entropy, mus))  # as defined in paper
-        mu = _entropic_sharpening(mu, h0)
+        if sharpen:
+            mu = _entropic_sharpening(mu, h0)
+        mu.interpolate(mu / assemble(mu * dx)) # normalisation step
 
         for i in range(num_dists):
             v[i].update(v[i].rhs * (mu / d[i]))
@@ -141,7 +157,7 @@ def wasserstein_barycenter(
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    EPSILON_TARGET = 0.01
+    EPSILON_TARGET = 0.001
     TOL = 1e-5
     N = 200  # single fine mesh
 
@@ -170,18 +186,32 @@ if __name__ == "__main__":
     print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
     print("=" * 60)
 
-    print(f"\nCold start — eps={EPSILON_TARGET}")
+    print(f"\n[A] Without sharpening — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_cold, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL
+    bary_no_sharp, _, _ = wasserstein_barycenter(
+        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=False
     )
-    t_cold = time.perf_counter() - t0
-    print(f"Wall time: {t_cold:.2f}s")
+    t_no_sharp = time.perf_counter() - t0
+    print(f"Wall time: {t_no_sharp:.2f}s")
+
+    print(f"\n[B] With sharpening — eps={EPSILON_TARGET}")
+    t0 = time.perf_counter()
+    bary_sharp, _, _ = wasserstein_barycenter(
+        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True
+    )
+    t_sharp = time.perf_counter() - t0
+    print(f"Wall time: {t_sharp:.2f}s")
+
     # ── Plot ───────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 1, figsize=(10, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    colors1 = tripcolor(bary_cold, axes=axes)
-    fig.colorbar(colors1, ax=axes)
-    axes.set_title(f"[A] Cold start (eps={EPSILON_TARGET})")
+    c0 = tripcolor(bary_no_sharp, axes=axes[0])
+    fig.colorbar(c0, ax=axes[0])
+    axes[0].set_title(f"[A] No sharpening (eps={EPSILON_TARGET})")
 
+    c1 = tripcolor(bary_sharp, axes=axes[1])
+    fig.colorbar(c1, ax=axes[1])
+    axes[1].set_title(f"[B] With sharpening (eps={EPSILON_TARGET})")
+
+    plt.tight_layout()
     plt.show()
