@@ -3,60 +3,30 @@ from firedrake import *
 
 
 class AbstractHeatEquationSolver(ABC):
-
-    @abstractmethod
-    def solve(self):
-        """Run one solve step and return the output function."""
-
-    @abstractmethod
-    def initialise(self, value=None):
-        """Set the initial RHS value before the first solve."""
-
-    @abstractmethod
-    def update(self, value):
-        """Update the RHS to a new value between solves."""
-
-    @abstractmethod
-    def update_dt(self, new_dt):
-        """Change the timestep without rebuilding the solver."""
-
-    @abstractmethod
-    def refine(self, new_V, new_dt):
-        """Transfer state into a finer function space."""
-
-
-class BackwardEulerSingleStep(AbstractHeatEquationSolver):
     def __init__(self, V, dt=0.1, params=None):
-        """
-        Solves one backward-Euler step of the heat equation, yielding the
-        modified Helmholtz problem (I - dt*Δ)u = u₀ solved by Firedrake.
-
-        Parameters
-        ----------
-        V      : The function space the equation is solved in
-        dt     : The time step (single step only)
-        params : The Firedrake solver parameters
-        """
         if params is None:
             params = {"ksp_type": "preonly", "pc_type": "lu"}
 
+        self.V = V
         self.params = params
         self.dt_const = Constant(dt)
 
-        self.u = TrialFunction(V)
-        self.v = TestFunction(V)
-        self.rhs = Function(V)
-        self.output_function = Function(V)
-
+        self._allocate()
         self._build_problem()
 
+    def _allocate(self, rhs_value=None):
+        """Create trial/test/rhs/output on self.V. If rhs_value given, interpolate into new rhs."""
+        self.u = TrialFunction(self.V)
+        self.v = TestFunction(self.V)
+        self.output_function = Function(self.V)
+        new_rhs = Function(self.V)
+        if rhs_value is not None:
+            new_rhs.interpolate(rhs_value)
+        self.rhs = new_rhs
+
+    @abstractmethod
     def _build_problem(self):
-        self.a = (
-            self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
-        ) * dx
-        self.L = inner(self.rhs, self.v) * dx
-        self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
-        self.solver = LinearVariationalSolver(self.problem, solver_parameters=self.params)
+        """Define self.a, self.L, self.problem, self.solver on current trial/test/output."""
 
     def solve(self):
         self.solver.solve()
@@ -75,11 +45,48 @@ class BackwardEulerSingleStep(AbstractHeatEquationSolver):
         self.dt_const.assign(new_dt)
 
     def refine(self, new_V, new_dt):
+        old_rhs = self.rhs
+        self.V = new_V
         self.dt_const.assign(new_dt)
-
-        self.u = TrialFunction(new_V)
-        self.v = TestFunction(new_V)
-        self.output_function = Function(new_V)
-        self.rhs = assemble(interpolate(self.rhs, new_V))
-
+        self._allocate(rhs_value=old_rhs)
         self._build_problem()
+
+
+class BackwardEulerSingleStep(AbstractHeatEquationSolver):
+    """
+    One backward-Euler step of the heat equation:
+    (I - dt*Δ)u = u₀, solved by Firedrake.
+    """
+
+    def _build_problem(self):
+        self.a = (
+            self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
+        ) * dx
+        self.L = inner(self.rhs, self.v) * dx
+        self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
+        self.solver = LinearVariationalSolver(self.problem, solver_parameters=self.params)
+
+
+class BackwardEulerMultiStep(BackwardEulerSingleStep):
+    """
+    Backward-Euler with n_steps sub-steps per solve() call.
+
+    The `dt` argument is the *total* time advanced by one solve(); each
+    sub-step uses dt/n_steps. This makes it a drop-in replacement for
+    BackwardEulerSingleStep.
+    """
+
+    def __init__(self, V, dt=0.1, n_steps=1, params=None):
+        self.n_steps = n_steps
+        super().__init__(V, dt=dt / n_steps, params=params)
+        self._total_dt = dt
+
+    def update_dt(self, new_dt):
+        self._total_dt = new_dt
+        self.dt_const.assign(new_dt / self.n_steps)
+
+    def solve(self):
+        for _ in range(self.n_steps):
+            self.solver.solve()
+            self.rhs.assign(self.output_function)
+        return self.output_function
