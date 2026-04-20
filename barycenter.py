@@ -14,7 +14,7 @@ from firedrake import (
     exp,
 )
 from firedrake.pyplot import tripcolor
-from solvers import BackwardEulerSingleStep
+from solvers import BackwardEulerSingleStep, BackwardEulerMultiStep
 from scipy.optimize import root_scalar
 
 
@@ -89,7 +89,8 @@ def _entropic_sharpening(mu, h0):
 
 
 def wasserstein_barycenter(
-    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None, sharpen=True
+    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None, sharpen=True,
+    n_steps=1,
 ):
     """
     Compute the Wasserstein barycenter of given distributions at a single mesh level.
@@ -107,14 +108,18 @@ def wasserstein_barycenter(
     d = []
 
     if v is None and w is None:
-        v = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
-        w = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
+        if n_steps == 1:
+            v = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
+            w = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
+        else:
+            v = [BackwardEulerMultiStep(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
+            w = [BackwardEulerMultiStep(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
         for i in range(num_dists):
             v[i].initialise()
             w[i].initialise()
     else:
         for i in range(num_dists):
-            old_epsilon = 2 * float(v[i].dt_const)
+            old_epsilon = 2 * float(getattr(v[i], "_total_dt", v[i].dt_const))
             ratio = old_epsilon / epsilon
             v[i].rhs.interpolate(v[i].rhs ** ratio)
             v[i].update_dt(epsilon / 2)
@@ -186,32 +191,34 @@ if __name__ == "__main__":
     print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
     print("=" * 60)
 
-    print(f"\n[A] Without sharpening — eps={EPSILON_TARGET}")
-    t0 = time.perf_counter()
-    bary_no_sharp, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=False
-    )
-    t_no_sharp = time.perf_counter() - t0
-    print(f"Wall time: {t_no_sharp:.2f}s")
+    N_STEPS = 5
 
-    print(f"\n[B] With sharpening — eps={EPSILON_TARGET}")
+    print(f"\n[A] Single-step Euler — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_sharp, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True
+    bary_single, _, _ = wasserstein_barycenter(
+        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=1
     )
-    t_sharp = time.perf_counter() - t0
-    print(f"Wall time: {t_sharp:.2f}s")
+    t_single = time.perf_counter() - t0
+    print(f"Wall time: {t_single:.2f}s")
+
+    print(f"\n[B] Multi-step Euler ({N_STEPS} sub-steps) — eps={EPSILON_TARGET}")
+    t0 = time.perf_counter()
+    bary_multi, _, _ = wasserstein_barycenter(
+        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    )
+    t_multi = time.perf_counter() - t0
+    print(f"Wall time: {t_multi:.2f}s")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    c0 = tripcolor(bary_no_sharp, axes=axes[0])
+    c0 = tripcolor(bary_single, axes=axes[0])
     fig.colorbar(c0, ax=axes[0])
-    axes[0].set_title(f"[A] No sharpening (eps={EPSILON_TARGET})")
+    axes[0].set_title(f"[A] Single-step Euler (eps={EPSILON_TARGET})")
 
-    c1 = tripcolor(bary_sharp, axes=axes[1])
+    c1 = tripcolor(bary_multi, axes=axes[1])
     fig.colorbar(c1, ax=axes[1])
-    axes[1].set_title(f"[B] With sharpening (eps={EPSILON_TARGET})")
+    axes[1].set_title(f"[B] {N_STEPS}-step Euler (eps={EPSILON_TARGET})")
 
     plt.tight_layout()
     plt.show()

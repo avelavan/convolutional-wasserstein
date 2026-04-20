@@ -69,21 +69,13 @@ class BackwardEulerSingleStep(AbstractHeatEquationSolver):
 
 class BackwardEulerMultiStep(BackwardEulerSingleStep):
     """
-    Backward-Euler with n_steps sub-steps per solve() call.
-
-    The `dt` argument is the *total* time advanced by one solve(); each
-    sub-step uses dt/n_steps. This makes it a drop-in replacement for
-    BackwardEulerSingleStep.
+    Backward-Euler that takes n_steps steps of size dt per solve() call.
+    Total time advanced per solve() is n_steps * dt.
     """
 
     def __init__(self, V, dt=0.1, n_steps=1, params=None):
         self.n_steps = n_steps
-        super().__init__(V, dt=dt / n_steps, params=params)
-        self._total_dt = dt
-
-    def update_dt(self, new_dt):
-        self._total_dt = new_dt
-        self.dt_const.assign(new_dt / self.n_steps)
+        super().__init__(V, dt=dt, params=params)
 
     def solve(self):
         for _ in range(self.n_steps):
