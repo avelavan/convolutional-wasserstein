@@ -62,9 +62,6 @@ def _find_beta(mu, h0, tol=1e-5, maxiter=200):
     except ValueError:
         return 1.0
 
-def _entropic_limit_update(mu, h0):
-    pass
-
 
 def _entropic_sharpening(mu, h0):
     """
