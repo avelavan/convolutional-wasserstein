@@ -14,7 +14,7 @@ from firedrake import (
     exp,
 )
 from firedrake.pyplot import tripcolor
-from solvers import BackwardEulerSingleStep, BackwardEulerMultiStep
+from solvers import BackwardEuler
 from scipy.optimize import root_scalar
 
 
@@ -109,11 +109,11 @@ def wasserstein_barycenter(
 
     if v is None and w is None:
         if n_steps == 1:
-            v = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
-            w = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
+            v = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
+            w = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
         else:
-            v = [BackwardEulerMultiStep(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
-            w = [BackwardEulerMultiStep(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
+            v = [BackwardEuler(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
+            w = [BackwardEuler(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
         for i in range(num_dists):
             v[i].initialise()
             w[i].initialise()
@@ -210,15 +210,25 @@ if __name__ == "__main__":
     print(f"Wall time: {t_multi:.2f}s")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    c0 = tripcolor(bary_single, axes=axes[0])
-    fig.colorbar(c0, ax=axes[0])
-    axes[0].set_title(f"[A] Single-step Euler (eps={EPSILON_TARGET})")
+    mu_init = Function(V).assign(0.0)
+    for f in mus:
+        mu_init.interpolate(mu_init + f)
+    c_init = tripcolor(mu_init, axes=axes[0])
+    fig.colorbar(c_init, ax=axes[0])
+    axes[0].set_title("Initial distributions")
+    axes[0].set_aspect("equal")
 
-    c1 = tripcolor(bary_multi, axes=axes[1])
-    fig.colorbar(c1, ax=axes[1])
-    axes[1].set_title(f"[B] {N_STEPS}-step Euler (eps={EPSILON_TARGET})")
+    c0 = tripcolor(bary_single, axes=axes[1])
+    fig.colorbar(c0, ax=axes[1])
+    axes[1].set_title(f"[A] Single-step Euler (eps={EPSILON_TARGET})")
+    axes[1].set_aspect("equal")
+
+    c1 = tripcolor(bary_multi, axes=axes[2])
+    fig.colorbar(c1, ax=axes[2])
+    axes[2].set_title(f"[B] {N_STEPS}-step Euler (eps={EPSILON_TARGET})")
+    axes[2].set_aspect("equal")
 
     plt.tight_layout()
     plt.show()

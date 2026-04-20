@@ -52,11 +52,15 @@ class AbstractHeatEquationSolver(ABC):
         self._build_problem()
 
 
-class BackwardEulerSingleStep(AbstractHeatEquationSolver):
+class BackwardEuler(AbstractHeatEquationSolver):
     """
-    One backward-Euler step of the heat equation:
-    (I - dt*Δ)u = u₀, solved by Firedrake.
+    Backward-Euler solver for the heat equation: (I - dt*Δ)u = u₀.
+    Takes n_steps steps of size dt per solve() call.
     """
+
+    def __init__(self, V, dt=0.1, n_steps=1, params=None):
+        self.n_steps = n_steps
+        super().__init__(V, dt=dt, params=params)
 
     def _build_problem(self):
         self.a = (
@@ -66,19 +70,15 @@ class BackwardEulerSingleStep(AbstractHeatEquationSolver):
         self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
         self.solver = LinearVariationalSolver(self.problem, solver_parameters=self.params)
 
-
-class BackwardEulerMultiStep(BackwardEulerSingleStep):
-    """
-    Backward-Euler that takes n_steps steps of size dt per solve() call.
-    Total time advanced per solve() is n_steps * dt.
-    """
-
-    def __init__(self, V, dt=0.1, n_steps=1, params=None):
-        self.n_steps = n_steps
-        super().__init__(V, dt=dt, params=params)
-
     def solve(self):
-        for _ in range(self.n_steps):
+        if self.n_steps == 1:
+            self.solver.solve()
+            return self.output_function
+
+        saved = Function(self.V).assign(self.rhs)
+        for _ in range(self.n_steps - 1):
             self.solver.solve()
             self.rhs.assign(self.output_function)
+        self.solver.solve()
+        self.rhs.assign(saved)
         return self.output_function

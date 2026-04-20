@@ -11,7 +11,7 @@ except:
 from firedrake import *
 from firedrake.pyplot import tripcolor
 
-from solvers import BackwardEulerSingleStep
+from solvers import BackwardEuler
 
 
 # Constants
@@ -106,8 +106,8 @@ def sinkhorn(
     curr_mu_0 = Function(Vs[0])
     curr_mu_1 = Function(Vs[0])
 
-    Solver_0 = BackwardEulerSingleStep(Vs[0], dt=epsilons[0]/2)
-    Solver_1 = BackwardEulerSingleStep(Vs[0], dt=epsilons[0]/2)
+    Solver_0 = BackwardEuler(Vs[0], dt=epsilons[0]/2)
+    Solver_1 = BackwardEuler(Vs[0], dt=epsilons[0]/2)
 
     Solver_1.initialise()
 
