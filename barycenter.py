@@ -14,7 +14,7 @@ from firedrake import (
     exp,
 )
 from firedrake.pyplot import tripcolor
-from solvers import HeatEquationSolver
+from solvers import BackwardEulerSingleStep
 from scipy.optimize import root_scalar
 
 
@@ -107,8 +107,8 @@ def wasserstein_barycenter(
     d = []
 
     if v is None and w is None:
-        v = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
-        w = [HeatEquationSolver(V, dt=epsilon / 2) for _ in range(num_dists)]
+        v = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
+        w = [BackwardEulerSingleStep(V, dt=epsilon / 2) for _ in range(num_dists)]
         for i in range(num_dists):
             v[i].initialise()
             w[i].initialise()
