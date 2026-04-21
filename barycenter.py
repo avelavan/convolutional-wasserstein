@@ -173,7 +173,7 @@ def wasserstein_barycenter(
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
-        mu.interpolate(conditional(mu < 1e-12, 1e-12, mu))
+        # mu.interpolate(conditional(mu < 1e-12, 1e-12, mu))
         mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
         h0 = max(map(_entropy, mus))
         if sharpen:
