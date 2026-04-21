@@ -202,72 +202,78 @@ def wasserstein_barycenter(
 if __name__ == "__main__":
     EPSILON_TARGET = 0.001
     TOL = 1e-5
-    N = 200  # single fine mesh
-
-    V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
-
-    # Define input Gaussians
-    means = [[0.25, 0.25], [0.75, 0.75]]
-    sigma = 0.05
-    x, y = SpatialCoordinate(V.mesh())
-
-    mus = []
-    for mean in means:
-        f = Function(V)
-        f.interpolate(
-            (1 / (2 * pi * sigma**2))
-            * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
-        )
-        f.assign(f / assemble(f * dx))
-        mus.append(f)
-
-    alphas = [0.5, 0.5]
-
-    # ── Experiment ─────────────────────────────────────────────────────────────
-
-    print("=" * 60)
-    print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
-    print("=" * 60)
-
     N_STEPS = 20
 
-    print(f"\n[A] Single-step Euler — eps={EPSILON_TARGET}")
-    t0 = time.perf_counter()
-    bary_single, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=1
-    )
-    t_single = time.perf_counter() - t0
-    print(f"Wall time: {t_single:.2f}s")
-    gaussian_stats(bary_single, label="A: single-step Euler")
+    means = [[0.25, 0.25], [0.75, 0.75]]
+    sigma = 0.05
+    alphas = [0.5, 0.5]
 
-    print(f"\n[B] Multi-step Euler ({N_STEPS} sub-steps) — eps={EPSILON_TARGET}")
+    def make_mus(V):
+        x, y = SpatialCoordinate(V.mesh())
+        mus = []
+        for mean in means:
+            f = Function(V)
+            f.interpolate(
+                (1 / (2 * pi * sigma**2))
+                * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
+            )
+            f.assign(f / assemble(f * dx))
+            mus.append(f)
+        return mus
+
+    # CG(1) — low-order mesh
+    N1 = 200
+    V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
+    mus1 = make_mus(V1)
+
+    # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
+    N2 = 200
+    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
+    mus2 = make_mus(V2)
+
+    # ── Experiments ────────────────────────────────────────────────────────────
+
+    print("=" * 60)
+    print(f"target eps={EPSILON_TARGET},  tol={TOL},  sub-steps={N_STEPS}")
+    print("=" * 60)
+
+    print(f"\n[A] CG(1) {N1}x{N1} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_multi, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    bary_lo, _, _ = wasserstein_barycenter(
+        mus1, alphas, V1, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
     )
-    t_multi = time.perf_counter() - t0
-    print(f"Wall time: {t_multi:.2f}s")
-    gaussian_stats(bary_multi, label="B: multi-step Euler")
+    t_lo = time.perf_counter() - t0
+    print(f"Wall time: {t_lo:.2f}s")
+    gaussian_stats(bary_lo, label="A: CG(1)")
+
+    print(f"\n[B] CG(2) {N2}x{N2} — eps={EPSILON_TARGET}")
+    t0 = time.perf_counter()
+    bary_hi, _, _ = wasserstein_barycenter(
+        mus2, alphas, V2, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    )
+    t_hi = time.perf_counter() - t0
+    print(f"Wall time: {t_hi:.2f}s")
+    gaussian_stats(bary_hi, label="B: CG(2)")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    mu_init = Function(V).assign(0.0)
-    for f in mus:
+    mu_init = Function(V1).assign(0.0)
+    for f in mus1:
         mu_init.interpolate(mu_init + f)
     c_init = tripcolor(mu_init, axes=axes[0])
     fig.colorbar(c_init, ax=axes[0])
     axes[0].set_title("Initial distributions")
     axes[0].set_aspect("equal")
 
-    c0 = tripcolor(bary_single, axes=axes[1])
-    fig.colorbar(c0, ax=axes[1])
-    axes[1].set_title(f"[A] Single-step Euler (eps={EPSILON_TARGET})")
+    c_lo = tripcolor(bary_lo, axes=axes[1])
+    fig.colorbar(c_lo, ax=axes[1])
+    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET})")
     axes[1].set_aspect("equal")
 
-    c1 = tripcolor(bary_multi, axes=axes[2])
-    fig.colorbar(c1, ax=axes[2])
-    axes[2].set_title(f"[B] {N_STEPS}-step Euler (eps={EPSILON_TARGET})")
+    c_hi = tripcolor(bary_hi, axes=axes[2])
+    fig.colorbar(c_hi, ax=axes[2])
+    axes[2].set_title(f"[B] CG(2) {N2}x{N2} (eps={EPSILON_TARGET})")
     axes[2].set_aspect("equal")
 
     plt.tight_layout()
