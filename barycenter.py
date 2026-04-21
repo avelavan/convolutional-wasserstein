@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from firedrake import (
     assemble,
+    conditional,
     ln,
     dx,
     Function,
@@ -103,7 +104,11 @@ def _entropic_sharpening(mu, h0):
 
     print("sharpening!")
     beta = _find_beta(mu, h0)
+    if beta == 1.0:
+        return mu
+    print(f"beta = {beta}, mass = {assemble(mu*dx)}")
     mu.interpolate(mu ** beta)
+    mu.interpolate(mu / assemble(mu * dx))
     return mu
 
 
@@ -123,7 +128,6 @@ def wasserstein_barycenter(
 
     mu = Function(V, name="mu").assign(1.0)
     mu.interpolate(mu / assemble(mu * dx))
-    w_prev = Function(V).assign(1.0)
     d = []
 
     if v is None and w is None:
@@ -131,18 +135,18 @@ def wasserstein_barycenter(
             v = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
             w = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
         else:
-            v = [BackwardEuler(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
-            w = [BackwardEuler(V, dt=epsilon / 2, n_steps=n_steps) for _ in range(num_dists)]
+            v = [BackwardEuler(V, dt=epsilon / (2 * n_steps), n_steps=n_steps) for _ in range(num_dists)]
+            w = [BackwardEuler(V, dt=epsilon / (2 * n_steps), n_steps=n_steps) for _ in range(num_dists)]
         for i in range(num_dists):
             v[i].initialise()
             w[i].initialise()
     else:
         for i in range(num_dists):
-            old_epsilon = 2 * float(getattr(v[i], "_total_dt", v[i].dt_const))
+            old_epsilon = 2 * n_steps * float(getattr(v[i], "_total_dt", v[i].dt_const))
             ratio = old_epsilon / epsilon
             v[i].rhs.interpolate(v[i].rhs ** ratio)
-            v[i].update_dt(epsilon / 2)
-            w[i].update_dt(epsilon / 2)
+            v[i].update_dt(epsilon / (2 * n_steps))
+            w[i].update_dt(epsilon / (2 * n_steps))
 
     for _ in range(num_dists):
         d.append(Function(V).assign(1.0))
@@ -150,30 +154,45 @@ def wasserstein_barycenter(
     curr = [assemble(interpolate(mus[i], V)) for i in range(num_dists)]
 
     j = 0
-    res = 1
+    res = float("inf")
+    res_best = float("inf")
+    stall_count = 0
+    stall_patience = 5
+    stall_min_improvement = 1e-2
+    mu_prev = Function(V)
+    h0 = max(map(_entropy, mus))  # mus are fixed; hoist out of the loop
+
     while (res > tol) and (j < maxiter):
+        mu_prev.assign(mu)
         mu.assign(1.0)
         # NOTE: this loop has sequential dependencies on mu — parallelising requires
         # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
-        res = 0
         for i in range(num_dists):
-            w_prev.assign(w[i].rhs)
-            v[i].solve()  # application of the heat kernel?
+            v[i].solve()
             w[i].update(curr[i] / v[i].output_function)
             w[i].solve()
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
-            res = max(norm(w_prev - w[i].rhs), res)
 
-        h0 = max(map(_entropy, mus))  # as defined in paper
+        mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
-        mu.interpolate(mu / assemble(mu * dx)) # normalisation step
 
         for i in range(num_dists):
             v[i].update(v[i].rhs * (mu / d[i]))
+
+        res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
         j += 1
+
+        if res < res_best * (1.0 - stall_min_improvement):
+            res_best = res
+            stall_count = 0
+        else:
+            stall_count += 1
+            if stall_count >= stall_patience:
+                print(f"  early stop: residual stalled for {stall_patience} iters (best={res_best:.6e})")
+                break
 
     return mu, v, w
 
@@ -188,7 +207,7 @@ if __name__ == "__main__":
     V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
 
     # Define input Gaussians
-    means = [[0.4, 0.4], [0.6, 0.6]]
+    means = [[0.25, 0.25], [0.75, 0.75]]
     sigma = 0.05
     x, y = SpatialCoordinate(V.mesh())
 
@@ -210,7 +229,7 @@ if __name__ == "__main__":
     print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
     print("=" * 60)
 
-    N_STEPS = 5
+    N_STEPS = 20
 
     print(f"\n[A] Single-step Euler — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
