@@ -208,7 +208,7 @@ if __name__ == "__main__":
     V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
 
     # Define input Gaussians
-    means = [[0.1, 0.1], [0.9, 0.9]]
+    means = [[0.25, 0.25], [0.75, 0.75]]
     sigma = 0.05
     x, y = SpatialCoordinate(V.mesh())
 
