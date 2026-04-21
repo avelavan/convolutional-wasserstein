@@ -5,7 +5,11 @@ from firedrake import *
 class AbstractHeatEquationSolver(ABC):
     def __init__(self, V, dt=0.1, params=None):
         if params is None:
-            params = {"ksp_type": "preonly", "pc_type": "lu"}
+            params = {
+                "ksp_type": "preonly",
+                "pc_type": "cholesky",
+                "ksp_reuse_preconditioner": True,
+            }
 
         self.V = V
         self.params = params
@@ -43,6 +47,7 @@ class AbstractHeatEquationSolver(ABC):
 
     def update_dt(self, new_dt):
         self.dt_const.assign(new_dt)
+        self.solver.invalidate_jacobian()
 
     def refine(self, new_V, new_dt):
         old_rhs = self.rhs
@@ -67,7 +72,9 @@ class BackwardEuler(AbstractHeatEquationSolver):
             self.dt_const * inner(grad(self.u), grad(self.v)) + inner(self.u, self.v)
         ) * dx
         self.L = inner(self.rhs, self.v) * dx
-        self.problem = LinearVariationalProblem(self.a, self.L, self.output_function)
+        self.problem = LinearVariationalProblem(
+            self.a, self.L, self.output_function, constant_jacobian=True,
+        )
         self.solver = LinearVariationalSolver(self.problem, solver_parameters=self.params)
 
     def solve(self):
