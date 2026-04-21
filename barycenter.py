@@ -72,7 +72,7 @@ def _find_beta(mu, h0, tol=1e-5, maxiter=200):
 
     def objective(beta):
         tmp.interpolate(mu ** beta)
-        tmp.interpolate(tmp / assemble(tmp * dx))
+        tmp.interpolate(tmp / max(assemble(tmp * dx), 1e-300))
         return _entropy(tmp) - h0
 
     a, b = 1.0, 2.0
@@ -108,7 +108,8 @@ def _entropic_sharpening(mu, h0):
         return mu
     print(f"beta = {beta}, mass = {assemble(mu*dx)}")
     mu.interpolate(mu ** beta)
-    mu.interpolate(mu / assemble(mu * dx))
+    mass = assemble(mu * dx)
+    mu.interpolate(mu / max(mass, 1e-300))
     return mu
 
 
@@ -127,7 +128,7 @@ def wasserstein_barycenter(
         raise ValueError(f"Weights must sum to 1, got {sum(alphas)}")
 
     mu = Function(V, name="mu").assign(1.0)
-    mu.interpolate(mu / assemble(mu * dx))
+    mu.interpolate(mu / max(assemble(mu * dx), 1e-300))
     d = []
 
     if v is None and w is None:
@@ -169,17 +170,17 @@ def wasserstein_barycenter(
         # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
         for i in range(num_dists):
             v[i].solve()
-            w[i].update(curr[i] / v[i].output_function)
+            w[i].update(curr[i] / (v[i].output_function + 1e-300))
             w[i].solve()
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
-        mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
+        mu.interpolate(mu / max(assemble(mu * dx), 1e-300))  # normalise before sharpening so entropy is comparable
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
 
         for i in range(num_dists):
-            v[i].update(v[i].rhs * (mu / d[i]))
+            v[i].update(v[i].rhs * (mu / (d[i] + 1e-300)))
 
         res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
@@ -200,7 +201,7 @@ def wasserstein_barycenter(
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    EPSILON_TARGET = 0.001
+    EPSILON_TARGET = 0.005
     TOL = 1e-5
     N_STEPS = 20
 
@@ -222,12 +223,12 @@ if __name__ == "__main__":
         return mus
 
     # CG(1) — low-order mesh
-    N1 = 200
+    N1 = 75
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
-    N2 = 200
+    N2 = 75
     V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
     mus2 = make_mus(V2)
 
