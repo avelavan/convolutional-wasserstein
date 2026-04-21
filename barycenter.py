@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from firedrake import (
     assemble,
+    conditional,
     ln,
     dx,
     Function,
@@ -103,7 +104,11 @@ def _entropic_sharpening(mu, h0):
 
     print("sharpening!")
     beta = _find_beta(mu, h0)
+    if beta == 1.0:
+        return mu
+    print(f"beta = {beta}, mass = {assemble(mu*dx)}")
     mu.interpolate(mu ** beta)
+    mu.interpolate(mu / assemble(mu * dx))
     return mu
 
 
@@ -168,11 +173,11 @@ def wasserstein_barycenter(
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
+        mu.interpolate(conditional(mu < 1e-12, 1e-12, mu))
         mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
         h0 = max(map(_entropy, mus))
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
-            mu.interpolate(mu / assemble(mu * dx))
 
         for i in range(num_dists):
             v[i].update(v[i].rhs * (mu / d[i]))
@@ -203,7 +208,7 @@ if __name__ == "__main__":
     V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
 
     # Define input Gaussians
-    means = [[0.3, 0.3], [0.7, 0.7]]
+    means = [[0.1, 0.1], [0.9, 0.9]]
     sigma = 0.05
     x, y = SpatialCoordinate(V.mesh())
 
