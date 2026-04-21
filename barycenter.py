@@ -160,6 +160,7 @@ def wasserstein_barycenter(
     stall_patience = 5
     stall_min_improvement = 1e-2
     mu_prev = Function(V)
+    h0 = max(map(_entropy, mus))  # mus are fixed; hoist out of the loop
 
     while (res > tol) and (j < maxiter):
         mu_prev.assign(mu)
@@ -173,9 +174,7 @@ def wasserstein_barycenter(
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
-        # mu.interpolate(conditional(mu < 1e-12, 1e-12, mu))
         mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
-        h0 = max(map(_entropy, mus))
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
 
@@ -230,7 +229,7 @@ if __name__ == "__main__":
     print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
     print("=" * 60)
 
-    N_STEPS = 5
+    N_STEPS = 20
 
     print(f"\n[A] Single-step Euler — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
