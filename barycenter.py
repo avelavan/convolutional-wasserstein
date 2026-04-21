@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 from firedrake import (
     assemble,
     conditional,
@@ -14,6 +15,8 @@ from firedrake import (
     SpatialCoordinate,
     pi,
     exp,
+    max_value,
+    Constant
 )
 from firedrake.pyplot import tripcolor
 from solvers import BackwardEuler
@@ -43,47 +46,78 @@ def gaussian_stats(mu, label=""):
 
 def _entropy(mu):
     """
-    Computes entropy of a probability distributions.
-
-    Args:
-        mu: probability distribution
-    Returns:
-        entropy: scalar entropy value
+    Computes entropy safely, surviving CG2 negative undershoots.
     """
-    entropy = -1 * assemble(mu * ln(mu + 1e-12) * dx)
+
+    # Clamp both to ensure the negative ripples contribute 0 to the entropy
+    # rather than crashing the logarithm
+    safe_mu = max_value(mu, 1e-12)
+    entropy = -1 * assemble(safe_mu * ln(safe_mu) * dx)
+
     return entropy
 
+def _find_beta(mu, h0, tol=1e-4, maxiter=50):
 
-def _find_beta(mu, h0, tol=1e-5, maxiter=200):
-    """
-    Performs root-finding to find beta value
-
-    Args:
-        mu: unsharpened barycenter
-        h0: user defined parameter, from _entropic_sharpening
-        tol: tolerance parameter for scipy solver
-        maxiter: maximum iterations before defaulting to beta=1
-
-    Returns:
-        beta: scalar solution to equation
-    """
     V = mu.function_space()
     tmp = Function(V)
+    beta_c = Constant(1.0)
 
-    def objective(beta):
-        tmp.interpolate(mu ** beta)
-        tmp.interpolate(tmp / assemble(tmp * dx))
-        return _entropy(tmp) - h0
+    # Safe base for exponentiation
+    safe_mu = max_value(mu, 1e-10)
+    expr = safe_mu ** beta_c
 
-    a, b = 1.0, 2.0
-    try:
-        if objective(b) > 0:
-            b = 5.0
-        result = root_scalar(objective, bracket=[a, b], method='brentq',
-                             xtol=tol, maxiter=maxiter)
-        return result.root if result.converged else 1.0
-    except ValueError:
-        return 1.0
+    def objective(b_val):
+        beta_c.assign(b_val)
+        tmp.interpolate(expr)
+
+        Z = assemble(tmp * dx)
+        # Trap mass destruction
+        if Z < 1e-14 or math.isnan(Z):
+            return 999.0
+
+        tmp.interpolate(tmp / Z)
+
+        # CRITICAL FIX: Clamp the function INSIDE the logarithm
+        # This protects the math from CG2 inter-nodal negative ripples!
+        safe_tmp = max_value(tmp, 1e-12)
+        ent = -1 * assemble(tmp * ln(safe_tmp) * dx)
+
+        # Trap the NaN so bisection never collapses again
+        if math.isnan(ent):
+            return 999.0
+
+        return ent - h0
+
+    # Find a valid upper bound
+    a = 1.0
+    b = 2.0
+    f_b = objective(b)
+
+    iters = 0
+    while f_b > 0 and iters < 3:
+        b *= 2.0
+        f_b = objective(b)
+        iters += 1
+
+    if f_b > 0:
+        print(f"  [Warning] Could not perfectly bound beta. Max tried: {b:.2f}")
+        return b
+
+        # Bisection
+    for _ in range(maxiter):
+        mid = (a + b) / 2.0
+        f_mid = objective(mid)
+
+        if abs(f_mid) < tol:
+            return mid
+
+        # Normal Python logic that is now safe from NaNs
+        if f_mid > 0:
+            a = mid
+        else:
+            b = mid
+
+    return (a + b) / 2.0
 
 
 def _entropic_sharpening(mu, h0):
@@ -108,7 +142,8 @@ def _entropic_sharpening(mu, h0):
         return mu
     print(f"beta = {beta}, mass = {assemble(mu*dx)}")
     mu.interpolate(mu ** beta)
-    mu.interpolate(mu / assemble(mu * dx))
+    mass = assemble(mu * dx)
+    mu.interpolate(mu / max(mass, 1e-300))
     return mu
 
 
@@ -127,7 +162,7 @@ def wasserstein_barycenter(
         raise ValueError(f"Weights must sum to 1, got {sum(alphas)}")
 
     mu = Function(V, name="mu").assign(1.0)
-    mu.interpolate(mu / assemble(mu * dx))
+    mu.interpolate(mu / max(assemble(mu * dx), 1e-300))
     d = []
 
     if v is None and w is None:
@@ -169,17 +204,17 @@ def wasserstein_barycenter(
         # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
         for i in range(num_dists):
             v[i].solve()
-            w[i].update(curr[i] / v[i].output_function)
+            w[i].update(curr[i] / (v[i].output_function + 1e-300))
             w[i].solve()
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
-        mu.interpolate(mu / assemble(mu * dx))  # normalise before sharpening so entropy is comparable
+        mu.interpolate(mu / max(assemble(mu * dx), 1e-300))  # normalise before sharpening so entropy is comparable
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
 
         for i in range(num_dists):
-            v[i].update(v[i].rhs * (mu / d[i]))
+            v[i].update(v[i].rhs * (mu / (d[i] + 1e-300)))
 
         res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
@@ -200,74 +235,80 @@ def wasserstein_barycenter(
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    EPSILON_TARGET = 0.001
+    EPSILON_TARGET = 0.005
     TOL = 1e-5
-    N = 200  # single fine mesh
-
-    V = FunctionSpace(UnitSquareMesh(N, N), "CG", 1)
-
-    # Define input Gaussians
-    means = [[0.25, 0.25], [0.75, 0.75]]
-    sigma = 0.05
-    x, y = SpatialCoordinate(V.mesh())
-
-    mus = []
-    for mean in means:
-        f = Function(V)
-        f.interpolate(
-            (1 / (2 * pi * sigma**2))
-            * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
-        )
-        f.assign(f / assemble(f * dx))
-        mus.append(f)
-
-    alphas = [0.5, 0.5]
-
-    # ── Experiment ─────────────────────────────────────────────────────────────
-
-    print("=" * 60)
-    print(f"Mesh: {N}x{N},  target eps={EPSILON_TARGET},  tol={TOL}")
-    print("=" * 60)
-
     N_STEPS = 20
 
-    print(f"\n[A] Single-step Euler — eps={EPSILON_TARGET}")
-    t0 = time.perf_counter()
-    bary_single, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=1
-    )
-    t_single = time.perf_counter() - t0
-    print(f"Wall time: {t_single:.2f}s")
-    gaussian_stats(bary_single, label="A: single-step Euler")
+    means = [[0.25, 0.25], [0.75, 0.75]]
+    sigma = 0.05
+    alphas = [0.5, 0.5]
 
-    print(f"\n[B] Multi-step Euler ({N_STEPS} sub-steps) — eps={EPSILON_TARGET}")
+    def make_mus(V):
+        x, y = SpatialCoordinate(V.mesh())
+        mus = []
+        for mean in means:
+            f = Function(V)
+            f.interpolate(
+                (1 / (2 * pi * sigma**2))
+                * exp(-((x - mean[0]) ** 2 + (y - mean[1]) ** 2) / (2 * sigma**2))
+            )
+            f.assign(f / assemble(f * dx))
+            mus.append(f)
+        return mus
+
+    # CG(1) — low-order mesh
+    N1 = 50
+    V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
+    mus1 = make_mus(V1)
+
+    # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
+    N2 = 50
+    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
+    mus2 = make_mus(V2)
+
+    # ── Experiments ────────────────────────────────────────────────────────────
+
+    print("=" * 60)
+    print(f"target eps={EPSILON_TARGET},  tol={TOL},  sub-steps={N_STEPS}")
+    print("=" * 60)
+
+    print(f"\n[A] CG(1) {N1}x{N1} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_multi, _, _ = wasserstein_barycenter(
-        mus, alphas, V, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    bary_lo, _, _ = wasserstein_barycenter(
+        mus1, alphas, V1, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
     )
-    t_multi = time.perf_counter() - t0
-    print(f"Wall time: {t_multi:.2f}s")
-    gaussian_stats(bary_multi, label="B: multi-step Euler")
+    t_lo = time.perf_counter() - t0
+    print(f"Wall time: {t_lo:.2f}s")
+    gaussian_stats(bary_lo, label="A: CG(1)")
+
+    print(f"\n[B] CG(2) {N2}x{N2} — eps={EPSILON_TARGET}")
+    t0 = time.perf_counter()
+    bary_hi, _, _ = wasserstein_barycenter(
+        mus2, alphas, V2, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    )
+    t_hi = time.perf_counter() - t0
+    print(f"Wall time: {t_hi:.2f}s")
+    gaussian_stats(bary_hi, label="B: CG(2)")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    mu_init = Function(V).assign(0.0)
-    for f in mus:
+    mu_init = Function(V1).assign(0.0)
+    for f in mus1:
         mu_init.interpolate(mu_init + f)
     c_init = tripcolor(mu_init, axes=axes[0])
     fig.colorbar(c_init, ax=axes[0])
     axes[0].set_title("Initial distributions")
     axes[0].set_aspect("equal")
 
-    c0 = tripcolor(bary_single, axes=axes[1])
-    fig.colorbar(c0, ax=axes[1])
-    axes[1].set_title(f"[A] Single-step Euler (eps={EPSILON_TARGET})")
+    c_lo = tripcolor(bary_lo, axes=axes[1])
+    fig.colorbar(c_lo, ax=axes[1])
+    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET})")
     axes[1].set_aspect("equal")
 
-    c1 = tripcolor(bary_multi, axes=axes[2])
-    fig.colorbar(c1, ax=axes[2])
-    axes[2].set_title(f"[B] {N_STEPS}-step Euler (eps={EPSILON_TARGET})")
+    c_hi = tripcolor(bary_hi, axes=axes[2])
+    fig.colorbar(c_hi, ax=axes[2])
+    axes[2].set_title(f"[B] CG(2) {N2}x{N2} (eps={EPSILON_TARGET})")
     axes[2].set_aspect("equal")
 
     plt.tight_layout()
