@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 from firedrake import (
     assemble,
     conditional,
@@ -14,6 +15,8 @@ from firedrake import (
     SpatialCoordinate,
     pi,
     exp,
+    max_value,
+    Constant
 )
 from firedrake.pyplot import tripcolor
 from solvers import BackwardEuler
@@ -43,47 +46,78 @@ def gaussian_stats(mu, label=""):
 
 def _entropy(mu):
     """
-    Computes entropy of a probability distributions.
-
-    Args:
-        mu: probability distribution
-    Returns:
-        entropy: scalar entropy value
+    Computes entropy safely, surviving CG2 negative undershoots.
     """
-    entropy = -1 * assemble(mu * ln(mu + 1e-12) * dx)
+
+    # Clamp both to ensure the negative ripples contribute 0 to the entropy
+    # rather than crashing the logarithm
+    safe_mu = max_value(mu, 1e-12)
+    entropy = -1 * assemble(safe_mu * ln(safe_mu) * dx)
+
     return entropy
 
+def _find_beta(mu, h0, tol=1e-4, maxiter=50):
 
-def _find_beta(mu, h0, tol=1e-5, maxiter=200):
-    """
-    Performs root-finding to find beta value
-
-    Args:
-        mu: unsharpened barycenter
-        h0: user defined parameter, from _entropic_sharpening
-        tol: tolerance parameter for scipy solver
-        maxiter: maximum iterations before defaulting to beta=1
-
-    Returns:
-        beta: scalar solution to equation
-    """
     V = mu.function_space()
     tmp = Function(V)
+    beta_c = Constant(1.0)
 
-    def objective(beta):
-        tmp.interpolate(mu ** beta)
-        tmp.interpolate(tmp / max(assemble(tmp * dx), 1e-300))
-        return _entropy(tmp) - h0
+    # Safe base for exponentiation
+    safe_mu = max_value(mu, 1e-10)
+    expr = safe_mu ** beta_c
 
-    a, b = 1.0, 2.0
-    try:
-        if objective(b) > 0:
-            b = 5.0
-        result = root_scalar(objective, bracket=[a, b], method='brentq',
-                             xtol=tol, maxiter=maxiter)
-        return result.root if result.converged else 1.0
-    except ValueError:
-        return 1.0
+    def objective(b_val):
+        beta_c.assign(b_val)
+        tmp.interpolate(expr)
+
+        Z = assemble(tmp * dx)
+        # Trap mass destruction
+        if Z < 1e-14 or math.isnan(Z):
+            return 999.0
+
+        tmp.interpolate(tmp / Z)
+
+        # CRITICAL FIX: Clamp the function INSIDE the logarithm
+        # This protects the math from CG2 inter-nodal negative ripples!
+        safe_tmp = max_value(tmp, 1e-12)
+        ent = -1 * assemble(tmp * ln(safe_tmp) * dx)
+
+        # Trap the NaN so bisection never collapses again
+        if math.isnan(ent):
+            return 999.0
+
+        return ent - h0
+
+    # Find a valid upper bound
+    a = 1.0
+    b = 2.0
+    f_b = objective(b)
+
+    iters = 0
+    while f_b > 0 and iters < 3:
+        b *= 2.0
+        f_b = objective(b)
+        iters += 1
+
+    if f_b > 0:
+        print(f"  [Warning] Could not perfectly bound beta. Max tried: {b:.2f}")
+        return b
+
+        # Bisection
+    for _ in range(maxiter):
+        mid = (a + b) / 2.0
+        f_mid = objective(mid)
+
+        if abs(f_mid) < tol:
+            return mid
+
+        # Normal Python logic that is now safe from NaNs
+        if f_mid > 0:
+            a = mid
+        else:
+            b = mid
+
+    return (a + b) / 2.0
 
 
 def _entropic_sharpening(mu, h0):
@@ -223,12 +257,12 @@ if __name__ == "__main__":
         return mus
 
     # CG(1) — low-order mesh
-    N1 = 75
+    N1 = 50
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
-    N2 = 75
+    N2 = 50
     V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
     mus2 = make_mus(V2)
 
