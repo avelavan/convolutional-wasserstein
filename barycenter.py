@@ -77,8 +77,6 @@ def _find_beta(mu, h0, tol=1e-4, maxiter=50):
 
         tmp.interpolate(tmp / Z)
 
-        # CRITICAL FIX: Clamp the function INSIDE the logarithm
-        # This protects the math from CG2 inter-nodal negative ripples!
         safe_tmp = max_value(tmp, 1e-12)
         ent = -1 * assemble(tmp * ln(safe_tmp) * dx)
 
@@ -143,6 +141,8 @@ def _entropic_sharpening(mu, h0):
     print(f"beta = {beta}, mass = {assemble(mu*dx)}")
     mu.interpolate(mu ** beta)
     mass = assemble(mu * dx)
+
+    # normalise after each sharpening
     mu.interpolate(mu / max(mass, 1e-300))
     return mu
 
