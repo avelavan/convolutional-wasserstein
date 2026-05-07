@@ -5,7 +5,6 @@ import math
 from firedrake import (
     assemble,
     conditional,
-    eq,
     ln,
     dx,
     Function,
@@ -52,8 +51,8 @@ def _entropy(mu):
 
     # Clamp both to ensure the negative ripples contribute 0 to the entropy
     # rather than crashing the logarithm
-    safe_mu = max_value(mu, 1e-12)
-    integrand = conditional(eq(mu, 0), 0, mu*ln(mu))
+    # safe_mu = max_value(mu, 1e-12)
+    integrand = conditional(mu > 0, mu * ln(mu), 0)
     entropy = -1 * assemble(integrand * dx)
 
     return entropy
@@ -141,6 +140,7 @@ def _entropic_sharpening(mu, h0):
         return mu
 
     print("sharpening!")
+    # print(f"sharpening! {h_mu} > {h0}")
     beta = _find_beta(mu, h0)
     if beta == 1.0:
         return mu
@@ -263,12 +263,12 @@ if __name__ == "__main__":
         return mus
 
     # CG(1) — low-order mesh
-    N1 = 200
+    N1 = 100
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
-    N2 = 50
+    N2 = 100
     V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
     mus2 = make_mus(V2)
 
