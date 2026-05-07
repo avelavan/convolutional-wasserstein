@@ -5,6 +5,7 @@ import math
 from firedrake import (
     assemble,
     conditional,
+    eq,
     ln,
     dx,
     Function,
@@ -52,7 +53,8 @@ def _entropy(mu):
     # Clamp both to ensure the negative ripples contribute 0 to the entropy
     # rather than crashing the logarithm
     safe_mu = max_value(mu, 1e-12)
-    entropy = -1 * assemble(safe_mu * ln(safe_mu) * dx)
+    integrand = conditional(eq(mu, 0), 0, mu*ln(mu))
+    entropy = -1 * assemble(integrand * dx)
 
     return entropy
 
@@ -63,7 +65,8 @@ def _find_beta(mu, h0, tol=1e-4, maxiter=50):
     beta_c = Constant(1.0)
 
     # Safe base for exponentiation
-    safe_mu = max_value(mu, 1e-10)
+    # safe_mu = max_value(mu, 1e-10)
+    safe_mu = mu
     expr = safe_mu ** beta_c
 
     def objective(b_val):
@@ -72,17 +75,20 @@ def _find_beta(mu, h0, tol=1e-4, maxiter=50):
 
         Z = assemble(tmp * dx)
         # Trap mass destruction
-        if Z < 1e-14 or math.isnan(Z):
-            return 999.0
+        # if Z < 1e-14 or math.isnan(Z):
+            # return 999.0
 
         tmp.interpolate(tmp / Z)
 
         safe_tmp = max_value(tmp, 1e-12)
+        safe_tmp = tmp
         ent = -1 * assemble(tmp * ln(safe_tmp) * dx)
 
         # Trap the NaN so bisection never collapses again
+        '''
         if math.isnan(ent):
             return 999.0
+        '''
 
         return ent - h0
 
@@ -101,7 +107,7 @@ def _find_beta(mu, h0, tol=1e-4, maxiter=50):
         print(f"  [Warning] Could not perfectly bound beta. Max tried: {b:.2f}")
         return b
 
-        # Bisection
+    # Bisection TODO: replace w Newton Method
     for _ in range(maxiter):
         mid = (a + b) / 2.0
         f_mid = objective(mid)
@@ -143,7 +149,7 @@ def _entropic_sharpening(mu, h0):
     mass = assemble(mu * dx)
 
     # normalise after each sharpening
-    mu.interpolate(mu / max(mass, 1e-300))
+    mu.interpolate(mu / mass)
     return mu
 
 
@@ -162,7 +168,7 @@ def wasserstein_barycenter(
         raise ValueError(f"Weights must sum to 1, got {sum(alphas)}")
 
     mu = Function(V, name="mu").assign(1.0)
-    mu.interpolate(mu / max(assemble(mu * dx), 1e-300))
+    mu.interpolate(mu / assemble(mu * dx))
     d = []
 
     if v is None and w is None:
@@ -204,17 +210,17 @@ def wasserstein_barycenter(
         # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
         for i in range(num_dists):
             v[i].solve()
-            w[i].update(curr[i] / (v[i].output_function + 1e-300))
+            w[i].update(curr[i] / (v[i].output_function))
             w[i].solve()
             d[i].interpolate(v[i].rhs * w[i].output_function)
             mu.interpolate(mu * (d[i] ** alphas[i]))
 
-        mu.interpolate(mu / max(assemble(mu * dx), 1e-300))  # normalise before sharpening so entropy is comparable
+        mu.interpolate(mu / assemble(mu * dx)) # normalise before sharpening so entropy is comparable
         if sharpen:
             mu = _entropic_sharpening(mu, h0)
 
         for i in range(num_dists):
-            v[i].update(v[i].rhs * (mu / (d[i] + 1e-300)))
+            v[i].update(v[i].rhs * (mu / (d[i])))
 
         res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
@@ -257,7 +263,7 @@ if __name__ == "__main__":
         return mus
 
     # CG(1) — low-order mesh
-    N1 = 50
+    N1 = 200
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
