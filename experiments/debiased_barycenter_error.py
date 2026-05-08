@@ -85,10 +85,7 @@ def plot_from_npz():
     log_norm_tail = log_norm[num_points:]
     slope, intercept = np.polyfit(log_eps_tail, log_norm_tail, 1)
     fit_line = np.exp(intercept) * eps_tail ** slope
-    ss_res = np.sum((log_norm_tail - (slope * log_eps_tail + intercept)) ** 2)
-    ss_tot = np.sum((log_norm_tail - np.mean(log_norm_tail)) ** 2)
-    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    print(f"Fit (last {-num_points}): error ≈ {np.exp(intercept):.4g} * eps^{slope:.4f}  (R²={r2:.4f})")
+    print(f"Fit (last {-num_points}): error ≈ {np.exp(intercept):.4g} * eps^{slope:.4f}")
 
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.plot(epsilons, norm, marker="o",
@@ -97,7 +94,6 @@ def plot_from_npz():
             label=fr"fit (last {-num_points}): slope={slope:.2f}, $R^2$={r2:.3f}")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.invert_xaxis()
     ax.set_xlabel(r"$\varepsilon$")
     ax.set_ylabel(r"$\|\hat g - g_{\mathrm{true}}\|_{L^2(\mathbb{R}^2)}$")
     ax.set_title("Reconstructed Gaussian barycenter error")
