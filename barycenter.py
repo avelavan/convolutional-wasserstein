@@ -298,8 +298,8 @@ def debiased_wasserstein_barycenter(
         for i in range(num_dists):
             v[i].update((mu / (d[i])))
 
-        # res = assemble(abs(mu - mu_prev)*dx) / assemble(abs(mu_prev)*dx)
-        res = norm(mu - mu_prev)
+        res = assemble(abs(mu - mu_prev)*dx) / assemble(abs(mu_prev)*dx)
+        # res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
         j += 1
 
@@ -359,6 +359,7 @@ if __name__ == "__main__":
     V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 1)
     mus2 = make_mus(V2)
 
+
     # ── Experiments ────────────────────────────────────────────────────────────
 
     print("=" * 60)
@@ -368,7 +369,7 @@ if __name__ == "__main__":
     print(f"\n[A] CG(1) {N1}x{N1} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
     bary_lo, _, _ = debiased_wasserstein_barycenter(
-        mus1, alphas, V1, epsilon=EPSILON_TARGET, tol=TOL, n_steps=N_STEPS
+        mus1, alphas, V1, epsilon=0.1, tol=TOL, n_steps=N_STEPS
     )
     t_lo = time.perf_counter() - t0
     print(f"Wall time: {t_lo:.2f}s")
@@ -376,8 +377,8 @@ if __name__ == "__main__":
 
     print(f"\n[B] CG(2) {N2}x{N2} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_hi, _, _ = wasserstein_barycenter(
-        mus2, alphas, V2, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    bary_hi, _, _ = debiased_wasserstein_barycenter(
+        mus2, alphas, V2, epsilon=0.05, tol=TOL, n_steps=N_STEPS
     )
     t_hi = time.perf_counter() - t0
     print(f"Wall time: {t_hi:.2f}s")
