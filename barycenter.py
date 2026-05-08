@@ -2,22 +2,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-from firedrake import (
-    assemble,
-    conditional,
-    ln,
-    dx,
-    Function,
-    interpolate,
-    norm,
-    FunctionSpace,
-    UnitSquareMesh,
-    SpatialCoordinate,
-    pi,
-    exp,
-    max_value,
-    Constant
-)
+from firedrake import *
 from firedrake.pyplot import tripcolor
 from solvers import BackwardEuler
 from scipy.optimize import root_scalar
@@ -237,15 +222,105 @@ def wasserstein_barycenter(
 
     return mu, v, w
 
+def debiased_wasserstein_barycenter(
+    mus, alphas, V, epsilon=0.05, tol=1e-7, maxiter=100, v=None, w=None,
+    n_steps=5,
+):
+    """
+    Compute the Wasserstein barycenter of given distributions at a single mesh level.
+
+    Supports epsilon warm-starting: if v/w are provided from a previous
+    run at a different epsilon, the scaling vectors are rescaled accordingly.
+    """
+    num_dists = len(mus)
+    if abs(sum(alphas) - 1) > 1e-10:
+        raise ValueError(f"Weights must sum to 1, got {sum(alphas)}")
+
+    mu = Function(V, name="mu").assign(1.0)
+    mu.interpolate(mu / assemble(mu * dx))
+    d = []
+
+    if v is None and w is None:
+        if n_steps == 1:
+            v = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
+            w = [BackwardEuler(V, dt=epsilon / 2) for _ in range(num_dists)]
+            p = BackwardEuler(V, dt=epsilon / 2)
+        else:
+            v = [BackwardEuler(V, dt=epsilon / (2 * n_steps), n_steps=n_steps) for _ in range(num_dists)]
+            w = [BackwardEuler(V, dt=epsilon / (2 * n_steps), n_steps=n_steps) for _ in range(num_dists)]
+            p = BackwardEuler(V, dt=epsilon / (2 * n_steps), n_steps=n_steps)
+        for i in range(num_dists):
+            v[i].initialise()
+            w[i].initialise()
+        p.initialise() # debiasing vector
+    else:
+        for i in range(num_dists):
+            old_epsilon = 2 * n_steps * float(getattr(v[i], "_total_dt", v[i].dt_const))
+            ratio = old_epsilon / epsilon
+            v[i].rhs.interpolate(v[i].rhs ** ratio)
+            v[i].update_dt(epsilon / (2 * n_steps))
+            w[i].update_dt(epsilon / (2 * n_steps))
+
+    for _ in range(num_dists):
+        d.append(Function(V).assign(1.0))
+
+    curr = [assemble(interpolate(mus[i], V)) for i in range(num_dists)]
+
+    j = 0
+    res = float("inf")
+    res_best = float("inf")
+    stall_count = 0
+    stall_patience = 5
+    stall_min_improvement = 1e-2
+    mu_prev = Function(V)
+    # h0 = max(map(_entropy, mus))  # mus are fixed; hoist out of the loop
+
+    while (res > tol) and (j < maxiter):
+        mu_prev.assign(mu)
+        mu.assign(1.0)
+        # NOTE: this loop has sequential dependencies on mu — parallelising requires
+        # a Jacobi-style update (compute all d[i] from previous mu, then update mu)
+        for i in range(num_dists):
+            v[i].solve()
+            w[i].update(curr[i] / (v[i].output_function))
+            w[i].solve()
+            d[i].interpolate(w[i].output_function)
+            mu.interpolate(mu * (d[i] ** alphas[i]))
+
+        mu.interpolate(mu * p.rhs)
+
+
+        mu.interpolate(mu / assemble(mu * dx))
+
+        p.solve()
+        p.update(sqrt(p.rhs * mu / p.output_function))
+
+        for i in range(num_dists):
+            v[i].update((mu / (d[i])))
+
+        res = assemble(abs(mu - mu_prev)*dx) / assemble(abs(mu_prev)*dx)
+        print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
+        j += 1
+
+        if res < res_best * (1.0 - stall_min_improvement):
+            res_best = res
+            stall_count = 0
+        else:
+            stall_count += 1
+            if stall_count >= stall_patience:
+                print(f"  early stop: residual stalled for {stall_patience} iters (best={res_best:.6e})")
+                break
+
+    return mu, v, w
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     EPSILON_TARGET = 0.005
     TOL = 1e-5
-    N_STEPS = 20
+    N_STEPS = 40
 
-    means = [[0.25, 0.25], [0.75, 0.75]]
+    means = [[0.25, 0.5], [0.75, 0.5]]
     sigma = 0.05
     alphas = [0.5, 0.5]
 
@@ -267,6 +342,17 @@ if __name__ == "__main__":
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
+    x, y = SpatialCoordinate(V1.mesh())
+    for i, m in enumerate(mus1):
+        mx = assemble(x * m * dx)
+        my = assemble(y * m * dx)
+        vxx = assemble((x - mx) ** 2 * m * dx)
+        vyy = assemble((y - my) ** 2 * m * dx)
+        cxy = assemble((x - mx) * (y - my) * m * dx)
+        total = assemble(m * dx)
+        print(f"input {i}: mass={total:.6f} mean=({mx:.4f},{my:.4f}) "
+              f"var=({vxx:.6f},{vyy:.6f}) cov={cxy:.6f}")
+
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
     N2 = 100
     V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
@@ -280,8 +366,8 @@ if __name__ == "__main__":
 
     print(f"\n[A] CG(1) {N1}x{N1} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
-    bary_lo, _, _ = wasserstein_barycenter(
-        mus1, alphas, V1, epsilon=EPSILON_TARGET, tol=TOL, sharpen=True, n_steps=N_STEPS
+    bary_lo, _, _ = debiased_wasserstein_barycenter(
+        mus1, alphas, V1, epsilon=EPSILON_TARGET, tol=TOL, n_steps=N_STEPS
     )
     t_lo = time.perf_counter() - t0
     print(f"Wall time: {t_lo:.2f}s")
