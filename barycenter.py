@@ -298,7 +298,8 @@ def debiased_wasserstein_barycenter(
         for i in range(num_dists):
             v[i].update((mu / (d[i])))
 
-        res = assemble(abs(mu - mu_prev)*dx) / assemble(abs(mu_prev)*dx)
+        # res = assemble(abs(mu - mu_prev)*dx) / assemble(abs(mu_prev)*dx)
+        res = norm(mu - mu_prev)
         print(f"  eps={epsilon:.4f}  iter={j:3d}  residual={res:.6e}")
         j += 1
 
@@ -316,11 +317,11 @@ def debiased_wasserstein_barycenter(
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    EPSILON_TARGET = 0.005
+    EPSILON_TARGET = 0.002
     TOL = 1e-5
-    N_STEPS = 40
+    N_STEPS = 20
 
-    means = [[0.25, 0.5], [0.75, 0.5]]
+    means = [[0.25, 0.75], [0.75, 0.25]]
     sigma = 0.05
     alphas = [0.5, 0.5]
 
@@ -338,7 +339,7 @@ if __name__ == "__main__":
         return mus
 
     # CG(1) — low-order mesh
-    N1 = 100
+    N1 = 200
     V1 = FunctionSpace(UnitSquareMesh(N1, N1), "CG", 1)
     mus1 = make_mus(V1)
 
@@ -354,8 +355,8 @@ if __name__ == "__main__":
               f"var=({vxx:.6f},{vyy:.6f}) cov={cxy:.6f}")
 
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
-    N2 = 100
-    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
+    N2 = 200
+    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 1)
     mus2 = make_mus(V2)
 
     # ── Experiments ────────────────────────────────────────────────────────────
@@ -371,7 +372,7 @@ if __name__ == "__main__":
     )
     t_lo = time.perf_counter() - t0
     print(f"Wall time: {t_lo:.2f}s")
-    gaussian_stats(bary_lo, label="A: CG(1)")
+    gaussian_stats(bary_lo, label="A: CG(1) - debiased sinkhorn")
 
     print(f"\n[B] CG(2) {N2}x{N2} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
@@ -380,7 +381,7 @@ if __name__ == "__main__":
     )
     t_hi = time.perf_counter() - t0
     print(f"Wall time: {t_hi:.2f}s")
-    gaussian_stats(bary_hi, label="B: CG(2)")
+    gaussian_stats(bary_hi, label="B: CG(1) - entropic sharpening")
 
     # ── Plot ───────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -395,12 +396,12 @@ if __name__ == "__main__":
 
     c_lo = tripcolor(bary_lo, axes=axes[1])
     fig.colorbar(c_lo, ax=axes[1])
-    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET})")
+    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET}) debiased sinkhorn")
     axes[1].set_aspect("equal")
 
     c_hi = tripcolor(bary_hi, axes=axes[2])
     fig.colorbar(c_hi, ax=axes[2])
-    axes[2].set_title(f"[B] CG(2) {N2}x{N2} (eps={EPSILON_TARGET})")
+    axes[2].set_title(f"[B] CG(1) {N2}x{N2} (eps={EPSILON_TARGET}) entropic sharpening")
     axes[2].set_aspect("equal")
 
     plt.tight_layout()
