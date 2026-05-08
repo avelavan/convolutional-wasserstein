@@ -317,7 +317,7 @@ def debiased_wasserstein_barycenter(
 # ── Setup ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    EPSILON_TARGET = 0.002
+    EPSILON_TARGET = 0.0005
     TOL = 1e-5
     N_STEPS = 20
 
@@ -356,7 +356,7 @@ if __name__ == "__main__":
 
     # CG(2) — higher-order mesh (similar DOF count to 200x200 CG1)
     N2 = 200
-    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 1)
+    V2 = FunctionSpace(UnitSquareMesh(N2, N2), "CG", 2)
     mus2 = make_mus(V2)
 
 
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     print(f"\n[A] CG(1) {N1}x{N1} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
     bary_lo, _, _ = debiased_wasserstein_barycenter(
-        mus1, alphas, V1, epsilon=0.1, tol=TOL, n_steps=N_STEPS
+        mus1, alphas, V1, epsilon=EPSILON_TARGET*2, tol=TOL, n_steps=N_STEPS
     )
     t_lo = time.perf_counter() - t0
     print(f"Wall time: {t_lo:.2f}s")
@@ -378,7 +378,7 @@ if __name__ == "__main__":
     print(f"\n[B] CG(2) {N2}x{N2} — eps={EPSILON_TARGET}")
     t0 = time.perf_counter()
     bary_hi, _, _ = debiased_wasserstein_barycenter(
-        mus2, alphas, V2, epsilon=0.05, tol=TOL, n_steps=N_STEPS
+        mus2, alphas, V2, epsilon=EPSILON_TARGET, tol=TOL, n_steps=N_STEPS
     )
     t_hi = time.perf_counter() - t0
     print(f"Wall time: {t_hi:.2f}s")
@@ -397,12 +397,12 @@ if __name__ == "__main__":
 
     c_lo = tripcolor(bary_lo, axes=axes[1])
     fig.colorbar(c_lo, ax=axes[1])
-    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET}) debiased sinkhorn")
+    axes[1].set_title(f"[A] CG(1) {N1}x{N1} (eps={EPSILON_TARGET*2}) debiased sinkhorn")
     axes[1].set_aspect("equal")
 
     c_hi = tripcolor(bary_hi, axes=axes[2])
     fig.colorbar(c_hi, ax=axes[2])
-    axes[2].set_title(f"[B] CG(1) {N2}x{N2} (eps={EPSILON_TARGET}) entropic sharpening")
+    axes[2].set_title(f"[B] CG(2) {N2}x{N2} (eps={EPSILON_TARGET}) debiased sinkhorn")
     axes[2].set_aspect("equal")
 
     plt.tight_layout()
